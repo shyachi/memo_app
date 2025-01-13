@@ -4,7 +4,6 @@ from tkinter import filedialog
 from tkinter import messagebox
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
-from ttkwidgets.frames import ScrolledFrame
 from datetime import datetime
 from tkcalendar import DateEntry
 
@@ -38,138 +37,131 @@ class MemoApp:
         self.add_button = ttk.Button(self.left_frame, text="新規メモ追加", command=self.add_memo)
         self.add_button.pack(fill='x', pady=(0, 5))
 
-        # スクロール可能なフレームの作成
-        self.scrolled_frame = ScrolledFrame(self.left_frame, width=280)
-        self.scrolled_frame.pack(fill='both', expand=True)
-
-        # メモリストの作成
-        self.memo_list_frame = self.scrolled_frame.interior
+        # Treeviewの作成
+        self.tree = ttk.Treeview(self.left_frame, columns=('date',), show='tree headings')
+        self.tree.heading('date', text='日付')
+        self.tree.column('date', width=100)
         
-        # メモ項目の初期化
-        self.memo_items = []
-        self.current_memo_index = None
+        # Treeviewのスクロールバー
+        self.scrollbar = ttk.Scrollbar(self.left_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=self.scrollbar.set)
+        
+        self.scrollbar.pack(side='right', fill='y')
+        self.tree.pack(fill='both', expand=True)
 
-        # 右側のフレーム（テキストエリア用）
+        # メモ項目の初期化
+        self.memo_items = {}
+        self.current_memo_id = None
+
+        # 右側のフレーム（編集エリア用）
         self.right_frame = ttk.Frame(self.main_frame)
         self.right_frame.pack(side='right', fill='both', expand=True, padx=5, pady=5)
+
+        # 編集エリアの上部フレーム
+        self.edit_top_frame = ttk.Frame(self.right_frame)
+        self.edit_top_frame.pack(fill='x', pady=(0, 5))
+
+        # タイトル編集
+        self.title_var = tk.StringVar()
+        self.title_entry = ttk.Entry(self.edit_top_frame, textvariable=self.title_var)
+        self.title_entry.pack(side='left', fill='x', expand=True)
+
+        # 日付選択
+        self.date_entry = DateEntry(self.edit_top_frame, width=12, background='darkblue',
+                                  foreground='white', borderwidth=2, locale='ja_JP',
+                                  date_pattern='yyyy/mm/dd')
+        self.date_entry.pack(side='left', padx=5)
+
+        # 削除ボタン
+        self.delete_button = ttk.Button(self.edit_top_frame, text="削除", command=self.delete_current_memo)
+        self.delete_button.pack(side='right', padx=5)
 
         # テキストエリアの作成
         self.text_area = tk.Text(self.right_frame, wrap=tk.WORD)
         self.text_area.pack(expand=True, fill='both')
 
+        # イベントの設定
+        self.tree.bind('<<TreeviewSelect>>', self.on_tree_select)
+        self.title_var.trace_add('write', self.on_title_change)
+        self.date_entry.bind('<<DateEntrySelected>>', self.on_date_change)
+        self.text_area.bind('<<Modified>>', self.on_text_modified)
+
         # 初期メモの追加
         self.add_memo()
 
-        # テキスト変更イベントの設定
-        self.text_area.bind('<<Modified>>', self.on_text_modified)
-
-    def create_memo_item(self, name="新規メモ"):
-        item_frame = ttk.Frame(self.memo_list_frame)
-        item_frame.pack(fill='x', pady=2)
+    def add_memo(self):
+        # 新規メモの作成
+        memo_id = str(len(self.memo_items))
+        title = "新規メモ"
+        date = datetime.now().strftime('%Y/%m/%d')
         
-        # メモ項目のメインフレーム
-        main_item_frame = ttk.Frame(item_frame)
-        main_item_frame.pack(fill='x', pady=2)
+        # Treeviewに追加
+        item = self.tree.insert('', 'end', memo_id, text=title, values=(date,))
         
-        # 名前入力フィールド
-        name_var = tk.StringVar(value=name)
-        name_entry = ttk.Entry(main_item_frame, textvariable=name_var)
-        name_entry.pack(side='left', fill='x', expand=True)
-        
-        # 日時選択
-        date_var = tk.StringVar()
-        date_entry = DateEntry(main_item_frame, width=12, background='darkblue',
-                             foreground='white', borderwidth=2, locale='ja_JP',
-                             date_pattern='yyyy/mm/dd')
-        date_entry.pack(side='left', padx=5)
-        
-        # ボタンフレーム
-        button_frame = ttk.Frame(main_item_frame)
-        button_frame.pack(side='right')
-        
-        # 選択ボタン
-        select_button = ttk.Button(
-            button_frame,
-            text="選択",
-            width=6
-        )
-        select_button.pack(side='left', padx=2)
-        
-        # 削除ボタン
-        delete_button = ttk.Button(
-            button_frame,
-            text="削除",
-            width=6
-        )
-        delete_button.pack(side='left', padx=2)
-        
-        memo_item = {
-            'frame': item_frame,
-            'name_var': name_var,
-            'date_entry': date_entry,
-            'content': '',
-            'entry': name_entry,
-            'select_button': select_button,
-            'delete_button': delete_button
+        # メモデータの保存
+        self.memo_items[memo_id] = {
+            'title': title,
+            'date': date,
+            'content': ''
         }
         
-        # ボタンのコマンドを設定
-        index = len(self.memo_items)
-        select_button.configure(command=lambda idx=index: self.select_memo(idx))
-        delete_button.configure(command=lambda idx=index: self.delete_memo(idx))
-        
-        self.memo_items.append(memo_item)
-        return memo_item
+        # 新規メモを選択
+        self.tree.selection_set(item)
+        self.tree.see(item)
+        self.on_tree_select(None)
 
-    def add_memo(self):
-        memo_item = self.create_memo_item()
-        if self.current_memo_index is None:
-            self.select_memo(len(self.memo_items) - 1)
-
-    def delete_memo(self, index):
+    def delete_current_memo(self):
         if len(self.memo_items) <= 1:
             messagebox.showwarning("警告", "最後のメモは削除できません。")
             return
 
-        # メモアイテムの削除
-        memo_item = self.memo_items.pop(index)
-        memo_item['frame'].destroy()
+        if self.current_memo_id:
+            # 現在のメモを削除
+            self.tree.delete(self.current_memo_id)
+            del self.memo_items[self.current_memo_id]
+            
+            # 他のメモを選択
+            remaining = self.tree.get_children()
+            if remaining:
+                self.tree.selection_set(remaining[0])
+                self.tree.see(remaining[0])
+                self.on_tree_select(None)
+            else:
+                self.add_memo()
 
-        # インデックスの更新
-        if self.current_memo_index == index:
-            # 削除されたメモが選択中だった場合
-            new_index = min(index, len(self.memo_items) - 1)
-            self.current_memo_index = None
-            self.select_memo(new_index)
-        elif self.current_memo_index > index:
-            # 削除されたメモが現在選択中のメモより前にあった場合
-            self.current_memo_index -= 1
+    def on_tree_select(self, event):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        
+        # 現在のメモIDを更新
+        self.current_memo_id = selection[0]
+        memo = self.memo_items[self.current_memo_id]
+        
+        # UI更新
+        self.title_var.set(memo['title'])
+        self.date_entry.set_date(datetime.strptime(memo['date'], '%Y/%m/%d').date())
+        
+        self.text_area.delete(1.0, tk.END)
+        self.text_area.insert(1.0, memo['content'])
+        self.text_area.edit_modified(False)
 
-        # 残りのメモの削除ボタンのコマンドを更新
-        for i, item in enumerate(self.memo_items):
-            item['select_button'].configure(command=lambda idx=i: self.select_memo(idx))
-            item['delete_button'].configure(command=lambda idx=i: self.delete_memo(idx))
+    def on_title_change(self, *args):
+        if self.current_memo_id:
+            title = self.title_var.get()
+            self.memo_items[self.current_memo_id]['title'] = title
+            self.tree.item(self.current_memo_id, text=title)
+
+    def on_date_change(self, event):
+        if self.current_memo_id:
+            date = self.date_entry.get_date().strftime('%Y/%m/%d')
+            self.memo_items[self.current_memo_id]['date'] = date
+            self.tree.set(self.current_memo_id, 'date', date)
 
     def on_text_modified(self, event=None):
-        if self.text_area.edit_modified() and self.current_memo_index is not None:
-            # 現在のテキストを保存
-            self.memo_items[self.current_memo_index]['content'] = self.text_area.get(1.0, tk.END)
+        if self.text_area.edit_modified() and self.current_memo_id:
+            self.memo_items[self.current_memo_id]['content'] = self.text_area.get(1.0, tk.END)
             self.text_area.edit_modified(False)
-
-    def select_memo(self, index):
-        if self.current_memo_index is not None:
-            # 現在のテキストを保存
-            self.memo_items[self.current_memo_index]['content'] = self.text_area.get(1.0, tk.END)
-            # 前のボタンを有効化
-            self.memo_items[self.current_memo_index]['select_button'].state(['!disabled'])
-        
-        # 新しいメモを選択
-        self.current_memo_index = index
-        self.text_area.delete(1.0, tk.END)
-        self.text_area.insert(1.0, self.memo_items[index]['content'])
-        
-        # 選択されたメモのボタンを無効化
-        self.memo_items[index]['select_button'].state(['disabled'])
 
     def save_file(self):
         try:
@@ -178,20 +170,16 @@ class MemoApp:
                 filetypes=[("XMLファイル", "*.xml"), ("すべてのファイル", "*.*")]
             )
             if file_path:
-                # 現在のテキストを保存
-                if self.current_memo_index is not None:
-                    self.memo_items[self.current_memo_index]['content'] = self.text_area.get(1.0, tk.END)
-
                 # XML構造の作成
                 root = ET.Element("memos")
-                for item in self.memo_items:
-                    memo = ET.SubElement(root, "memo")
-                    name = ET.SubElement(memo, "name")
-                    name.text = item['name_var'].get()
-                    date = ET.SubElement(memo, "date")
-                    date.text = item['date_entry'].get_date().strftime('%Y/%m/%d')
-                    content = ET.SubElement(memo, "content")
-                    content.text = item['content']
+                for memo_id, memo in self.memo_items.items():
+                    memo_elem = ET.SubElement(root, "memo")
+                    name = ET.SubElement(memo_elem, "name")
+                    name.text = memo['title']
+                    date = ET.SubElement(memo_elem, "date")
+                    date.text = memo['date']
+                    content = ET.SubElement(memo_elem, "content")
+                    content.text = memo['content']
 
                 # XMLの整形
                 xml_str = minidom.parseString(ET.tostring(root, 'utf-8')).toprettyxml(indent="    ")
@@ -214,32 +202,36 @@ class MemoApp:
                 root = tree.getroot()
                 
                 # 既存のメモをクリア
-                for item in self.memo_items:
-                    item['frame'].destroy()
+                for item_id in self.tree.get_children():
+                    self.tree.delete(item_id)
                 self.memo_items.clear()
                 
                 # メモデータの読み込み
-                for memo in root.findall('memo'):
-                    name = memo.find('name').text or "新規メモ"
-                    date_text = memo.find('date').text if memo.find('date') is not None else ""
+                for i, memo in enumerate(root.findall('memo')):
+                    memo_id = str(i)
+                    title = memo.find('name').text or "新規メモ"
+                    date_text = memo.find('date').text if memo.find('date') is not None else datetime.now().strftime('%Y/%m/%d')
                     content = memo.find('content').text or ""
                     
-                    memo_item = self.create_memo_item(name)
-                    if date_text:
-                        try:
-                            date = datetime.strptime(date_text, '%Y/%m/%d').date()
-                            memo_item['date_entry'].set_date(date)
-                        except ValueError:
-                            pass
-                    memo_item['content'] = content
+                    # Treeviewに追加
+                    self.tree.insert('', 'end', memo_id, text=title, values=(date_text,))
+                    
+                    # メモデータの保存
+                    self.memo_items[memo_id] = {
+                        'title': title,
+                        'date': date_text,
+                        'content': content
+                    }
                 
                 # メモが1つも読み込まれなかった場合は新規メモを作成
                 if not self.memo_items:
                     self.add_memo()
-                
-                # 最初のメモを選択
-                self.current_memo_index = None
-                self.select_memo(0)
+                else:
+                    # 最初のメモを選択
+                    first_id = self.tree.get_children()[0]
+                    self.tree.selection_set(first_id)
+                    self.tree.see(first_id)
+                    self.on_tree_select(None)
                 
                 messagebox.showinfo("読み込み完了", "ファイルを読み込みました。")
         except Exception as e:
