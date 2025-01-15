@@ -20,10 +20,17 @@ class MemoApp:
         # ファイルメニュー
         self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="ファイル", menu=self.file_menu)
-        self.file_menu.add_command(label="開く", command=self.open_file)
-        self.file_menu.add_command(label="保存", command=self.save_file)
+        self.file_menu.add_command(label="開く (Ctrl+O)", command=self.open_file, accelerator="Control-O")
+        self.file_menu.add_command(label="保存 (Ctrl+S)", command=self.save_file, accelerator="Control-S")
+        self.file_menu.add_command(label="エクスポート", command=self.show_export_dialog)
         self.file_menu.add_separator()
         self.file_menu.add_command(label="終了", command=self.root.quit)
+
+        # キーボードショートカットの設定
+        self.root.bind("<Control-o>", lambda e: self.open_file())
+        self.root.bind("<Control-O>", lambda e: self.open_file())
+        self.root.bind("<Control-s>", lambda e: self.save_file())
+        self.root.bind("<Control-S>", lambda e: self.save_file())
 
         # メインフレームの作成
         self.main_frame = ttk.Frame(self.root)
@@ -192,6 +199,36 @@ class MemoApp:
         except Exception as e:
             messagebox.showerror("エラー", f"保存中にエラーが発生しました：{str(e)}")
 
+    def show_export_dialog(self):
+        ExportDialog(self.root, self)
+
+    def export_memos(self, selected_only=False):
+        try:
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("テキストファイル", "*.txt"), ("すべてのファイル", "*.*")]
+            )
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as file:
+                    if selected_only and self.current_memo_id:
+                        # 選択中のメモのみエクスポート
+                        memo = self.memo_items[self.current_memo_id]
+                        file.write(f"タイトル: {memo['title']}\n")
+                        file.write(f"日付: {memo['date']}\n")
+                        file.write(f"内容:\n{memo['content']}\n")
+                    else:
+                        # すべてのメモをエクスポート
+                        for memo_id in self.tree.get_children():
+                            memo = self.memo_items[memo_id]
+                            file.write(f"タイトル: {memo['title']}\n")
+                            file.write(f"日付: {memo['date']}\n")
+                            file.write(f"内容:\n{memo['content']}\n")
+                            file.write("-" * 50 + "\n")  # 区切り線
+                
+                messagebox.showinfo("エクスポート完了", "メモをエクスポートしました。")
+        except Exception as e:
+            messagebox.showerror("エラー", f"エクスポート中にエラーが発生しました：{str(e)}")
+
     def open_file(self):
         try:
             file_path = filedialog.askopenfilename(
@@ -241,6 +278,38 @@ def main():
     root = tk.Tk()
     app = MemoApp(root)
     root.mainloop()
+
+class ExportDialog:
+    def __init__(self, parent, app):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("エクスポート設定")
+        self.dialog.geometry("300x150")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        # エクスポート範囲の選択
+        self.export_frame = ttk.LabelFrame(self.dialog, text="エクスポート範囲", padding=10)
+        self.export_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.export_var = tk.StringVar(value="all")
+        ttk.Radiobutton(self.export_frame, text="すべてのメモ", 
+                       variable=self.export_var, value="all").pack(anchor='w')
+        ttk.Radiobutton(self.export_frame, text="選択中のメモのみ", 
+                       variable=self.export_var, value="selected").pack(anchor='w')
+        
+        # ボタンフレーム
+        button_frame = ttk.Frame(self.dialog)
+        button_frame.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Button(button_frame, text="キャンセル", 
+                  command=self.dialog.destroy).pack(side='right', padx=5)
+        ttk.Button(button_frame, text="エクスポート", 
+                  command=lambda: self.export(app)).pack(side='right')
+
+    def export(self, app):
+        selected_only = self.export_var.get() == "selected"
+        self.dialog.destroy()
+        app.export_memos(selected_only)
 
 if __name__ == "__main__":
     main()
