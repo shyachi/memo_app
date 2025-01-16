@@ -22,6 +22,11 @@ class MemoApp:
         # ファイルメニュー
         self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="ファイル", menu=self.file_menu)
+
+        # フィルターメニュー
+        self.filter_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="フィルター", menu=self.filter_menu)
+        self.filter_menu.add_command(label="タグでフィルター", command=self.show_tag_filter_dialog)
         self.file_menu.add_command(label="開く (Ctrl+O)", command=self.open_file, accelerator="Control-O")
         self.file_menu.add_command(label="上書き保存 (Ctrl+S)", command=self.save_file, accelerator="Control-S")
         self.file_menu.add_command(label="名前をつけて保存", command=self.save_file_as)
@@ -49,6 +54,9 @@ class MemoApp:
 
         # Treeviewの作成
         self.tree = ttk.Treeview(self.left_frame, columns=('title', 'date', 'tags'), show='headings')
+        self.tree_style = ttk.Style()
+        self.tree_style.configure('Filtered.Treeview', background='#FFE6E6')
+        self.is_filtered = False
         
         # タイトル列の設定
         self.tree.heading('title', text='タイトル', command=self.sort_by_title)
@@ -311,6 +319,76 @@ class MemoApp:
             messagebox.showerror("エラー", f"保存中にエラーが発生しました：{str(e)}")
             raise
 
+    def show_tag_filter_dialog(self):
+        TagFilterDialog(self.root, self)
+
+    def get_all_tags(self):
+        all_tags = set()
+        for memo in self.memo_items.values():
+            all_tags.update(memo.get('tags', set()))
+        return sorted(all_tags)
+
+    def update_buttons_state(self):
+        # フィルター状態に応じてボタンの状態を設定
+        state = 'disabled' if self.is_filtered else 'normal'
+        self.add_button.configure(state=state)
+        self.add_tag_button.configure(state=state)
+        self.remove_tag_button.configure(state=state)
+        self.tag_entry.configure(state=state)
+
+    def apply_tag_filter(self, selected_tags):
+        if not selected_tags:
+            # フィルター解除
+            self.tree.configure(style='')
+            self.is_filtered = False
+            
+            # すべてのメモを再表示
+            self.tree.delete(*self.tree.get_children())  # 現在の表示をクリア
+            for memo_id, memo in self.memo_items.items():
+                title = memo['title']
+                date = memo['date']
+                tags_str = ', '.join(sorted(memo.get('tags', set())))
+                self.tree.insert('', 'end', memo_id, values=(title, date, tags_str))
+        else:
+            # フィルター適用
+            self.tree.configure(style='Filtered.Treeview')
+            self.is_filtered = True
+
+            # 現在の表示をクリア
+            self.tree.delete(*self.tree.get_children())
+
+            # 条件に合うメモのみを表示し、最初の該当メモのIDを記録
+            first_filtered_id = None
+            current_memo_filtered = False
+
+            for memo_id, memo in self.memo_items.items():
+                memo_tags = memo.get('tags', set())
+                if any(tag in memo_tags for tag in selected_tags):
+                    title = memo['title']
+                    date = memo['date']
+                    tags_str = ', '.join(sorted(memo_tags))
+                    self.tree.insert('', 'end', memo_id, values=(title, date, tags_str))
+                    
+                    if first_filtered_id is None:
+                        first_filtered_id = memo_id
+                    if memo_id == self.current_memo_id:
+                        current_memo_filtered = True
+
+            # 選択状態の更新
+            if first_filtered_id:
+                if not current_memo_filtered:
+                    # 現在選択中のメモがフィルターで除外された場合、最初の該当メモを選択
+                    self.tree.selection_set(first_filtered_id)
+                    self.tree.see(first_filtered_id)
+                    self.on_tree_select(None)
+                else:
+                    # 現在選択中のメモが表示されている場合、その選択を維持
+                    self.tree.selection_set(self.current_memo_id)
+                    self.tree.see(self.current_memo_id)
+
+        # ボタンの状態を更新
+        self.update_buttons_state()
+
     def show_export_dialog(self):
         ExportDialog(self.root, self)
 
@@ -419,6 +497,50 @@ class ExportDialog:
         selected_only = self.export_var.get() == "selected"
         self.dialog.destroy()
         app.export_memos(selected_only)
+
+class TagFilterDialog:
+    def __init__(self, parent, app):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("タグでフィルター")
+        self.dialog.geometry("300x400")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        # タグ選択フレーム
+        self.tag_frame = ttk.LabelFrame(self.dialog, text="フィルターするタグを選択", padding=10)
+        self.tag_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        # タグ選択用のListbox（複数選択可能）
+        self.tag_listbox = tk.Listbox(self.tag_frame, selectmode=tk.MULTIPLE)
+        self.tag_listbox.pack(fill='both', expand=True)
+
+        # 利用可能なタグを取得してListboxに追加
+        for tag in app.get_all_tags():
+            self.tag_listbox.insert(tk.END, tag)
+
+        # ボタンフレーム
+        button_frame = ttk.Frame(self.dialog)
+        button_frame.pack(fill='x', padx=10, pady=10)
+
+        # フィルター解除ボタン
+        ttk.Button(button_frame, text="フィルター解除", 
+                  command=lambda: self.apply_filter(app, None)).pack(side='left', padx=5)
+
+        # キャンセルボタン
+        ttk.Button(button_frame, text="キャンセル", 
+                  command=self.dialog.destroy).pack(side='right', padx=5)
+
+        # 実行ボタン
+        ttk.Button(button_frame, text="実行", 
+                  command=lambda: self.apply_filter(app)).pack(side='right')
+
+    def apply_filter(self, app, selected_tags=None):
+        if selected_tags is None and self.tag_listbox.curselection():
+            # 選択されたタグを取得
+            selected_tags = [self.tag_listbox.get(i) for i in self.tag_listbox.curselection()]
+        
+        app.apply_tag_filter(selected_tags)
+        self.dialog.destroy()
 
 if __name__ == "__main__":
     main()
