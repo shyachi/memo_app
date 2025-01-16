@@ -48,7 +48,7 @@ class MemoApp:
         self.add_button.pack(fill='x', pady=(0, 5))
 
         # Treeviewの作成
-        self.tree = ttk.Treeview(self.left_frame, columns=('title', 'date'), show='headings')
+        self.tree = ttk.Treeview(self.left_frame, columns=('title', 'date', 'tags'), show='headings')
         
         # タイトル列の設定
         self.tree.heading('title', text='タイトル', command=self.sort_by_title)
@@ -57,6 +57,10 @@ class MemoApp:
         # 日付列の設定
         self.tree.heading('date', text='日付', command=self.sort_by_date)
         self.tree.column('date', width=100)
+
+        # タグ列の設定
+        self.tree.heading('tags', text='タグ')
+        self.tree.column('tags', width=150)
         
         # ソート状態の初期化
         self.sort_reverse_date = False
@@ -100,6 +104,31 @@ class MemoApp:
         self.text_area = tk.Text(self.right_frame, wrap=tk.WORD)
         self.text_area.pack(expand=True, fill='both')
 
+        # タグ編集エリアの作成
+        self.tags_frame = ttk.LabelFrame(self.right_frame, text="タグ", padding=5)
+        self.tags_frame.pack(fill='x', pady=5)
+
+        # タグ表示ラベル
+        self.tags_label = ttk.Label(self.tags_frame, text="")
+        self.tags_label.pack(side='left', fill='x', expand=True)
+
+        # タグ編集フレーム
+        self.tag_edit_frame = ttk.Frame(self.tags_frame)
+        self.tag_edit_frame.pack(side='right')
+
+        # タグ入力フィールド
+        self.tag_var = tk.StringVar()
+        self.tag_entry = ttk.Entry(self.tag_edit_frame, textvariable=self.tag_var, width=20)
+        self.tag_entry.pack(side='left', padx=5)
+
+        # タグ追加ボタン
+        self.add_tag_button = ttk.Button(self.tag_edit_frame, text="追加", command=self.add_tag)
+        self.add_tag_button.pack(side='left', padx=2)
+
+        # タグ削除ボタン
+        self.remove_tag_button = ttk.Button(self.tag_edit_frame, text="削除", command=self.remove_tag)
+        self.remove_tag_button.pack(side='left', padx=2)
+
         # イベントの設定
         self.tree.bind('<<TreeviewSelect>>', self.on_tree_select)
         self.title_var.trace_add('write', self.on_title_change)
@@ -109,52 +138,74 @@ class MemoApp:
         # 初期メモの追加
         self.add_memo()
 
+    def add_tag(self):
+        if not self.current_memo_id:
+            return
+        
+        tag = self.tag_var.get().strip()
+        if tag:
+            memo = self.memo_items[self.current_memo_id]
+            if 'tags' not in memo:
+                memo['tags'] = set()
+            memo['tags'].add(tag)
+            self.update_tags_display()
+            self.tag_var.set("")  # 入力フィールドをクリア
+
+    def remove_tag(self):
+        if not self.current_memo_id:
+            return
+        
+        tag = self.tag_var.get().strip()
+        if tag:
+            memo = self.memo_items[self.current_memo_id]
+            if 'tags' in memo and tag in memo['tags']:
+                memo['tags'].remove(tag)
+                self.update_tags_display()
+            self.tag_var.set("")  # 入力フィールドをクリア
+
+    def update_tags_display(self):
+        if not self.current_memo_id:
+            return
+        
+        memo = self.memo_items[self.current_memo_id]
+        tags = memo.get('tags', set())
+        tags_str = ', '.join(sorted(tags))
+        
+        # タグラベルの更新
+        self.tags_label.config(text=tags_str)
+        
+        # Treeviewのタグ列を更新
+        self.tree.set(self.current_memo_id, 'tags', tags_str)
+
     def sort_by_title(self):
-        # 現在のアイテムをすべて取得
         items = [(self.tree.set(item, 'title'), item) for item in self.tree.get_children('')]
-        
-        # タイトルでソート（日本語対応）
-        locale.setlocale(locale.LC_ALL, '')  # システムのデフォルトロケールを使用
+        locale.setlocale(locale.LC_ALL, '')
         items.sort(key=lambda x: locale.strxfrm(x[0]), reverse=self.sort_reverse_title)
-        
-        # ソート方向を反転（次回のソートのため）
         self.sort_reverse_title = not self.sort_reverse_title
-        
-        # Treeviewの項目を並べ替え
         for index, (title, item) in enumerate(items):
             self.tree.move(item, '', index)
 
     def sort_by_date(self):
-        # 現在のアイテムをすべて取得
         items = [(self.tree.set(item, 'date'), item) for item in self.tree.get_children('')]
-        
-        # 日付でソート
         items.sort(reverse=self.sort_reverse_date)
-        
-        # ソート方向を反転（次回のソートのため）
         self.sort_reverse_date = not self.sort_reverse_date
-        
-        # Treeviewの項目を並べ替え
         for index, (date, item) in enumerate(items):
             self.tree.move(item, '', index)
 
     def add_memo(self):
-        # 新規メモの作成
         memo_id = str(len(self.memo_items))
         title = "新規メモ"
         date = datetime.now().strftime('%Y/%m/%d')
         
-        # Treeviewに追加
-        item = self.tree.insert('', 'end', memo_id, values=(title, date))
+        item = self.tree.insert('', 'end', memo_id, values=(title, date, ""))
         
-        # メモデータの保存
         self.memo_items[memo_id] = {
             'title': title,
             'date': date,
-            'content': ''
+            'content': '',
+            'tags': set()
         }
         
-        # 新規メモを選択
         self.tree.selection_set(item)
         self.tree.see(item)
         self.on_tree_select(None)
@@ -165,11 +216,9 @@ class MemoApp:
             return
 
         if self.current_memo_id:
-            # 現在のメモを削除
             self.tree.delete(self.current_memo_id)
             del self.memo_items[self.current_memo_id]
             
-            # 他のメモを選択
             remaining = self.tree.get_children()
             if remaining:
                 self.tree.selection_set(remaining[0])
@@ -183,17 +232,17 @@ class MemoApp:
         if not selection:
             return
         
-        # 現在のメモIDを更新
         self.current_memo_id = selection[0]
         memo = self.memo_items[self.current_memo_id]
         
-        # UI更新
         self.title_var.set(memo['title'])
         self.date_entry.set_date(datetime.strptime(memo['date'], '%Y/%m/%d').date())
         
         self.text_area.delete(1.0, tk.END)
         self.text_area.insert(1.0, memo['content'])
         self.text_area.edit_modified(False)
+        
+        self.update_tags_display()
 
     def on_title_change(self, *args):
         if self.current_memo_id:
@@ -240,7 +289,6 @@ class MemoApp:
 
     def save_to_file(self, file_path):
         try:
-            # XML構造の作成
             root = ET.Element("memos")
             for memo_id, memo in self.memo_items.items():
                 memo_elem = ET.SubElement(root, "memo")
@@ -250,11 +298,11 @@ class MemoApp:
                 date.text = memo['date']
                 content = ET.SubElement(memo_elem, "content")
                 content.text = memo['content']
+                tags = ET.SubElement(memo_elem, "tags")
+                tags.text = ','.join(sorted(memo.get('tags', set())))
 
-            # XMLの整形
             xml_str = minidom.parseString(ET.tostring(root, 'utf-8')).toprettyxml(indent="    ")
             
-            # ファイルに保存
             with open(file_path, 'w', encoding='utf-8') as file:
                 file.write(xml_str)
             
@@ -275,19 +323,19 @@ class MemoApp:
             if file_path:
                 with open(file_path, 'w', encoding='utf-8') as file:
                     if selected_only and self.current_memo_id:
-                        # 選択中のメモのみエクスポート
                         memo = self.memo_items[self.current_memo_id]
                         file.write(f"タイトル: {memo['title']}\n")
                         file.write(f"日付: {memo['date']}\n")
+                        file.write(f"タグ: {', '.join(sorted(memo.get('tags', set())))}\n")
                         file.write(f"内容:\n{memo['content']}\n")
                     else:
-                        # すべてのメモをエクスポート
                         for memo_id in self.tree.get_children():
                             memo = self.memo_items[memo_id]
                             file.write(f"タイトル: {memo['title']}\n")
                             file.write(f"日付: {memo['date']}\n")
+                            file.write(f"タグ: {', '.join(sorted(memo.get('tags', set())))}\n")
                             file.write(f"内容:\n{memo['content']}\n")
-                            file.write("-" * 50 + "\n")  # 区切り線
+                            file.write("-" * 50 + "\n")
                 
                 messagebox.showinfo("エクスポート完了", "メモをエクスポートしました。")
         except Exception as e:
@@ -304,33 +352,30 @@ class MemoApp:
                 tree = ET.parse(file_path)
                 root = tree.getroot()
                 
-                # 既存のメモをクリア
                 for item_id in self.tree.get_children():
                     self.tree.delete(item_id)
                 self.memo_items.clear()
                 
-                # メモデータの読み込み
                 for i, memo in enumerate(root.findall('memo')):
                     memo_id = str(i)
                     title = memo.find('name').text or "新規メモ"
                     date_text = memo.find('date').text if memo.find('date') is not None else datetime.now().strftime('%Y/%m/%d')
                     content = memo.find('content').text or ""
+                    tags_text = memo.find('tags').text if memo.find('tags') is not None else ""
+                    tags = set(filter(None, tags_text.split(','))) if tags_text else set()
                     
-                    # Treeviewに追加
-                    self.tree.insert('', 'end', memo_id, values=(title, date_text))
+                    self.tree.insert('', 'end', memo_id, values=(title, date_text, ', '.join(sorted(tags))))
                     
-                    # メモデータの保存
                     self.memo_items[memo_id] = {
                         'title': title,
                         'date': date_text,
-                        'content': content
+                        'content': content,
+                        'tags': tags
                     }
                 
-                # メモが1つも読み込まれなかった場合は新規メモを作成
                 if not self.memo_items:
                     self.add_memo()
                 else:
-                    # 最初のメモを選択
                     first_id = self.tree.get_children()[0]
                     self.tree.selection_set(first_id)
                     self.tree.see(first_id)
@@ -353,7 +398,6 @@ class ExportDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
-        # エクスポート範囲の選択
         self.export_frame = ttk.LabelFrame(self.dialog, text="エクスポート範囲", padding=10)
         self.export_frame.pack(fill='x', padx=10, pady=5)
         
@@ -363,7 +407,6 @@ class ExportDialog:
         ttk.Radiobutton(self.export_frame, text="選択中のメモのみ", 
                        variable=self.export_var, value="selected").pack(anchor='w')
         
-        # ボタンフレーム
         button_frame = ttk.Frame(self.dialog)
         button_frame.pack(fill='x', padx=10, pady=10)
         
