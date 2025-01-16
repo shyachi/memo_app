@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 from datetime import datetime
 from tkcalendar import DateEntry
+import locale
 
 class MemoApp:
     def __init__(self, root):
@@ -47,12 +48,19 @@ class MemoApp:
         self.add_button.pack(fill='x', pady=(0, 5))
 
         # Treeviewの作成
-        self.tree = ttk.Treeview(self.left_frame, columns=('date',), show='tree headings')
+        self.tree = ttk.Treeview(self.left_frame, columns=('title', 'date'), show='headings')
+        
+        # タイトル列の設定
+        self.tree.heading('title', text='タイトル', command=self.sort_by_title)
+        self.tree.column('title', width=150)
+        
+        # 日付列の設定
         self.tree.heading('date', text='日付', command=self.sort_by_date)
         self.tree.column('date', width=100)
         
         # ソート状態の初期化
-        self.sort_reverse = False
+        self.sort_reverse_date = False
+        self.sort_reverse_title = False
         
         # Treeviewのスクロールバー
         self.scrollbar = ttk.Scrollbar(self.left_frame, orient="vertical", command=self.tree.yview)
@@ -101,15 +109,30 @@ class MemoApp:
         # 初期メモの追加
         self.add_memo()
 
+    def sort_by_title(self):
+        # 現在のアイテムをすべて取得
+        items = [(self.tree.set(item, 'title'), item) for item in self.tree.get_children('')]
+        
+        # タイトルでソート（日本語対応）
+        locale.setlocale(locale.LC_ALL, '')  # システムのデフォルトロケールを使用
+        items.sort(key=lambda x: locale.strxfrm(x[0]), reverse=self.sort_reverse_title)
+        
+        # ソート方向を反転（次回のソートのため）
+        self.sort_reverse_title = not self.sort_reverse_title
+        
+        # Treeviewの項目を並べ替え
+        for index, (title, item) in enumerate(items):
+            self.tree.move(item, '', index)
+
     def sort_by_date(self):
         # 現在のアイテムをすべて取得
         items = [(self.tree.set(item, 'date'), item) for item in self.tree.get_children('')]
         
         # 日付でソート
-        items.sort(reverse=self.sort_reverse)
+        items.sort(reverse=self.sort_reverse_date)
         
         # ソート方向を反転（次回のソートのため）
-        self.sort_reverse = not self.sort_reverse
+        self.sort_reverse_date = not self.sort_reverse_date
         
         # Treeviewの項目を並べ替え
         for index, (date, item) in enumerate(items):
@@ -122,7 +145,7 @@ class MemoApp:
         date = datetime.now().strftime('%Y/%m/%d')
         
         # Treeviewに追加
-        item = self.tree.insert('', 'end', memo_id, text=title, values=(date,))
+        item = self.tree.insert('', 'end', memo_id, values=(title, date))
         
         # メモデータの保存
         self.memo_items[memo_id] = {
@@ -176,7 +199,7 @@ class MemoApp:
         if self.current_memo_id:
             title = self.title_var.get()
             self.memo_items[self.current_memo_id]['title'] = title
-            self.tree.item(self.current_memo_id, text=title)
+            self.tree.set(self.current_memo_id, 'title', title)
 
     def on_date_change(self, event):
         if self.current_memo_id:
@@ -217,25 +240,25 @@ class MemoApp:
 
     def save_to_file(self, file_path):
         try:
-                # XML構造の作成
-                root = ET.Element("memos")
-                for memo_id, memo in self.memo_items.items():
-                    memo_elem = ET.SubElement(root, "memo")
-                    name = ET.SubElement(memo_elem, "name")
-                    name.text = memo['title']
-                    date = ET.SubElement(memo_elem, "date")
-                    date.text = memo['date']
-                    content = ET.SubElement(memo_elem, "content")
-                    content.text = memo['content']
+            # XML構造の作成
+            root = ET.Element("memos")
+            for memo_id, memo in self.memo_items.items():
+                memo_elem = ET.SubElement(root, "memo")
+                name = ET.SubElement(memo_elem, "name")
+                name.text = memo['title']
+                date = ET.SubElement(memo_elem, "date")
+                date.text = memo['date']
+                content = ET.SubElement(memo_elem, "content")
+                content.text = memo['content']
 
-                # XMLの整形
-                xml_str = minidom.parseString(ET.tostring(root, 'utf-8')).toprettyxml(indent="    ")
-                
-                # ファイルに保存
-                with open(file_path, 'w', encoding='utf-8') as file:
-                    file.write(xml_str)
-                
-                messagebox.showinfo("保存完了", "ファイルを保存しました。")
+            # XMLの整形
+            xml_str = minidom.parseString(ET.tostring(root, 'utf-8')).toprettyxml(indent="    ")
+            
+            # ファイルに保存
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(xml_str)
+            
+            messagebox.showinfo("保存完了", "ファイルを保存しました。")
         except Exception as e:
             messagebox.showerror("エラー", f"保存中にエラーが発生しました：{str(e)}")
             raise
@@ -294,7 +317,7 @@ class MemoApp:
                     content = memo.find('content').text or ""
                     
                     # Treeviewに追加
-                    self.tree.insert('', 'end', memo_id, text=title, values=(date_text,))
+                    self.tree.insert('', 'end', memo_id, values=(title, date_text))
                     
                     # メモデータの保存
                     self.memo_items[memo_id] = {
