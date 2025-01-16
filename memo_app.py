@@ -149,27 +149,63 @@ class MemoApp:
     def add_tag(self):
         if not self.current_memo_id:
             return
-        
+
         tag = self.tag_var.get().strip()
         if tag:
+            # 直接入力された場合
             memo = self.memo_items[self.current_memo_id]
             if 'tags' not in memo:
                 memo['tags'] = set()
             memo['tags'].add(tag)
             self.update_tags_display()
-            self.tag_var.set("")  # 入力フィールドをクリア
+            self.tag_var.set("")
+        else:
+            # タグ選択ダイアログを表示
+            all_tags = self.get_all_tags()
+            if not all_tags:
+                messagebox.showwarning("警告", "タグが入力されていません")
+                return
+            TagSelectionDialog(self.root, self, "追加するタグを選択", self.add_selected_tags)
+
+    def add_selected_tags(self, selected_tags):
+        if not selected_tags or not self.current_memo_id:
+            return
+        
+        memo = self.memo_items[self.current_memo_id]
+        if 'tags' not in memo:
+            memo['tags'] = set()
+        memo['tags'].update(selected_tags)
+        self.update_tags_display()
 
     def remove_tag(self):
         if not self.current_memo_id:
             return
-        
+
         tag = self.tag_var.get().strip()
         if tag:
+            # 直接入力された場合
             memo = self.memo_items[self.current_memo_id]
             if 'tags' in memo and tag in memo['tags']:
                 memo['tags'].remove(tag)
                 self.update_tags_display()
-            self.tag_var.set("")  # 入力フィールドをクリア
+            self.tag_var.set("")
+        else:
+            # タグ選択ダイアログを表示
+            memo = self.memo_items[self.current_memo_id]
+            current_tags = sorted(memo.get('tags', set()))
+            if not current_tags:
+                messagebox.showwarning("警告", "タグが入力されていません")
+                return
+            TagSelectionDialog(self.root, self, "削除するタグを選択", self.remove_selected_tags)
+
+    def remove_selected_tags(self, selected_tags):
+        if not selected_tags or not self.current_memo_id:
+            return
+        
+        memo = self.memo_items[self.current_memo_id]
+        if 'tags' in memo:
+            memo['tags'] -= set(selected_tags)
+            self.update_tags_display()
 
     def update_tags_display(self):
         if not self.current_memo_id:
@@ -541,6 +577,50 @@ class TagFilterDialog:
         
         app.apply_tag_filter(selected_tags)
         self.dialog.destroy()
+
+class TagSelectionDialog:
+    def __init__(self, parent, app, title, callback):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title(title)
+        self.dialog.geometry("300x400")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        # タグ選択フレーム
+        self.tag_frame = ttk.LabelFrame(self.dialog, text="タグを選択", padding=10)
+        self.tag_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        # タグ選択用のListbox（複数選択可能）
+        self.tag_listbox = tk.Listbox(self.tag_frame, selectmode=tk.MULTIPLE)
+        self.tag_listbox.pack(fill='both', expand=True)
+
+        # 利用可能なタグを取得してListboxに追加
+        if title == "削除するタグを選択":
+            # 削除の場合は現在のメモのタグのみ表示
+            tags = sorted(app.memo_items[app.current_memo_id].get('tags', set()))
+        else:
+            # 追加の場合は全タグを表示
+            tags = app.get_all_tags()
+
+        for tag in tags:
+            self.tag_listbox.insert(tk.END, tag)
+
+        # ボタンフレーム
+        button_frame = ttk.Frame(self.dialog)
+        button_frame.pack(fill='x', padx=10, pady=10)
+
+        # キャンセルボタン
+        ttk.Button(button_frame, text="キャンセル", 
+                  command=self.dialog.destroy).pack(side='right', padx=5)
+
+        # 実行ボタン
+        ttk.Button(button_frame, text="実行", 
+                  command=lambda: self.apply_selection(callback)).pack(side='right')
+
+    def apply_selection(self, callback):
+        selected_tags = [self.tag_listbox.get(i) for i in self.tag_listbox.curselection()]
+        self.dialog.destroy()
+        callback(selected_tags)
 
 if __name__ == "__main__":
     main()
