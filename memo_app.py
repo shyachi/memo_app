@@ -10,7 +10,8 @@ from tkcalendar import DateEntry
 class MemoApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("メモ帳")
+        self.current_file = None
+        self.update_title()
         self.root.geometry("1000x600")
 
         # メニューバーの作成
@@ -21,7 +22,8 @@ class MemoApp:
         self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="ファイル", menu=self.file_menu)
         self.file_menu.add_command(label="開く (Ctrl+O)", command=self.open_file, accelerator="Control-O")
-        self.file_menu.add_command(label="保存 (Ctrl+S)", command=self.save_file, accelerator="Control-S")
+        self.file_menu.add_command(label="上書き保存 (Ctrl+S)", command=self.save_file, accelerator="Control-S")
+        self.file_menu.add_command(label="名前をつけて保存", command=self.save_file_as)
         self.file_menu.add_command(label="エクスポート", command=self.show_export_dialog)
         self.file_menu.add_separator()
         self.file_menu.add_command(label="終了", command=self.root.quit)
@@ -46,8 +48,11 @@ class MemoApp:
 
         # Treeviewの作成
         self.tree = ttk.Treeview(self.left_frame, columns=('date',), show='tree headings')
-        self.tree.heading('date', text='日付')
+        self.tree.heading('date', text='日付', command=self.sort_by_date)
         self.tree.column('date', width=100)
+        
+        # ソート状態の初期化
+        self.sort_reverse = False
         
         # Treeviewのスクロールバー
         self.scrollbar = ttk.Scrollbar(self.left_frame, orient="vertical", command=self.tree.yview)
@@ -95,6 +100,20 @@ class MemoApp:
 
         # 初期メモの追加
         self.add_memo()
+
+    def sort_by_date(self):
+        # 現在のアイテムをすべて取得
+        items = [(self.tree.set(item, 'date'), item) for item in self.tree.get_children('')]
+        
+        # 日付でソート
+        items.sort(reverse=self.sort_reverse)
+        
+        # ソート方向を反転（次回のソートのため）
+        self.sort_reverse = not self.sort_reverse
+        
+        # Treeviewの項目を並べ替え
+        for index, (date, item) in enumerate(items):
+            self.tree.move(item, '', index)
 
     def add_memo(self):
         # 新規メモの作成
@@ -170,13 +189,34 @@ class MemoApp:
             self.memo_items[self.current_memo_id]['content'] = self.text_area.get(1.0, tk.END)
             self.text_area.edit_modified(False)
 
+    def update_title(self):
+        base_title = "メモ帳"
+        if self.current_file:
+            self.root.title(f"{base_title} - {self.current_file}")
+        else:
+            self.root.title(base_title)
+
     def save_file(self):
+        if self.current_file:
+            self.save_to_file(self.current_file)
+        else:
+            self.save_file_as()
+
+    def save_file_as(self):
         try:
             file_path = filedialog.asksaveasfilename(
                 defaultextension=".xml",
                 filetypes=[("XMLファイル", "*.xml"), ("すべてのファイル", "*.*")]
             )
             if file_path:
+                self.save_to_file(file_path)
+                self.current_file = file_path
+                self.update_title()
+        except Exception as e:
+            messagebox.showerror("エラー", f"保存中にエラーが発生しました：{str(e)}")
+
+    def save_to_file(self, file_path):
+        try:
                 # XML構造の作成
                 root = ET.Element("memos")
                 for memo_id, memo in self.memo_items.items():
@@ -198,6 +238,7 @@ class MemoApp:
                 messagebox.showinfo("保存完了", "ファイルを保存しました。")
         except Exception as e:
             messagebox.showerror("エラー", f"保存中にエラーが発生しました：{str(e)}")
+            raise
 
     def show_export_dialog(self):
         ExportDialog(self.root, self)
@@ -235,6 +276,8 @@ class MemoApp:
                 filetypes=[("XMLファイル", "*.xml"), ("すべてのファイル", "*.*")]
             )
             if file_path:
+                self.current_file = file_path
+                self.update_title()
                 tree = ET.parse(file_path)
                 root = tree.getroot()
                 
