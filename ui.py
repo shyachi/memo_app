@@ -1,0 +1,636 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from tkcalendar import DateEntry
+from datetime import datetime
+import locale
+from logic import MemoManager, Memo
+
+class MemoApp:
+    def __init__(self, root):
+        self.root = root
+        self.memo_manager = MemoManager()
+        self.current_memo_id = None
+        self.is_tag_filtered = False
+        self.is_date_filtered = False
+        
+        self._setup_window()
+        self._create_menu()
+        self._create_main_frame()
+        self._setup_shortcuts()
+        
+        # 初期メモの追加
+        self.add_memo()
+
+    def _setup_window(self):
+        self.root.geometry("1000x600")
+        self.update_title()
+
+    def update_title(self):
+        base_title = "メモ帳"
+        if self.memo_manager.current_file:
+            self.root.title(f"{base_title} - {self.memo_manager.current_file}")
+        else:
+            self.root.title(base_title)
+
+    def _create_menu(self):
+        self.menu_bar = tk.Menu(self.root)
+        self.root.config(menu=self.menu_bar)
+
+        # ファイルメニュー
+        self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="ファイル", menu=self.file_menu)
+        self.file_menu.add_command(label="開く (Ctrl+O)", command=self.open_file, accelerator="Control-O")
+        self.file_menu.add_command(label="上書き保存 (Ctrl+S)", command=self.save_file, accelerator="Control-S")
+        self.file_menu.add_command(label="名前をつけて保存", command=self.save_file_as)
+        self.file_menu.add_command(label="エクスポート", command=self.show_export_dialog)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="終了", command=self.root.quit)
+
+        # フィルターメニュー
+        self.filter_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="フィルター", menu=self.filter_menu)
+        self.filter_menu.add_command(label="タグでフィルター", command=self.show_tag_filter_dialog)
+        self.filter_menu.add_command(label="日付でフィルター", command=self.show_date_filter_dialog)
+        self.filter_menu.add_separator()
+        self.filter_menu.add_command(label="すべてのフィルターを解除", command=self.clear_all_filters)
+
+    def update_filter_menu(self):
+        """フィルターメニューの表示を更新"""
+        tag_label = "タグでフィルター（実行中）" if self.is_tag_filtered else "タグでフィルター"
+        date_label = "日付でフィルター（実行中）" if self.is_date_filtered else "日付でフィルター"
+        self.filter_menu.entryconfig(0, label=tag_label)
+        self.filter_menu.entryconfig(1, label=date_label)
+
+    def clear_all_filters(self):
+        """すべてのフィルターを解除"""
+        if self.is_tag_filtered or self.is_date_filtered:
+            self.is_tag_filtered = False
+            self.is_date_filtered = False
+            self.refresh_memo_list()
+            self.update_filter_menu()
+            self.update_buttons_state()
+
+    def refresh_memo_list(self):
+        """メモリストを更新"""
+        # 現在の表示をクリア
+        self.tree.delete(*self.tree.get_children())
+
+        # メモをフィルタリング
+        filtered_ids = set(self.memo_manager.memos.keys())
+
+        if self.is_tag_filtered and hasattr(self, 'current_tag_filter'):
+            filtered_ids &= {memo_id for memo_id, memo in self.memo_manager.memos.items()
+                           if any(tag in memo.tags for tag in self.current_tag_filter)}
+
+        if self.is_date_filtered and hasattr(self, 'current_date_range'):
+            start_date, end_date = self.current_date_range
+            date_filtered_ids = self.memo_manager.filter_by_date(start_date, end_date)
+            filtered_ids &= set(date_filtered_ids)
+
+        # フィルター結果を表示
+        first_filtered_id = None
+        current_memo_filtered = False
+
+        for memo_id in filtered_ids:
+            memo = self.memo_manager.memos[memo_id]
+            self.tree.insert('', 'end', memo_id, 
+                           values=(memo.title, memo.date, ', '.join(sorted(memo.tags))))
+            
+            if first_filtered_id is None:
+                first_filtered_id = memo_id
+            if memo_id == self.current_memo_id:
+                current_memo_filtered = True
+
+        # 選択状態の更新
+        if first_filtered_id:
+            if not current_memo_filtered:
+                self.tree.selection_set(first_filtered_id)
+                self.tree.see(first_filtered_id)
+                self.on_tree_select(None)
+            else:
+                self.tree.selection_set(self.current_memo_id)
+                self.tree.see(self.current_memo_id)
+
+        # スタイルの更新
+        style = 'Filtered.Treeview' if self.is_tag_filtered or self.is_date_filtered else ''
+        self.tree.configure(style=style)
+
+    def _setup_shortcuts(self):
+        self.root.bind("<Control-o>", lambda e: self.open_file())
+        self.root.bind("<Control-O>", lambda e: self.open_file())
+        self.root.bind("<Control-s>", lambda e: self.save_file())
+        self.root.bind("<Control-S>", lambda e: self.save_file())
+
+    def _create_main_frame(self):
+        # メインフレーム
+        self.main_frame = ttk.Frame(self.root)
+        self.main_frame.pack(expand=True, fill='both')
+
+        # 左側のフレーム（メモリスト）
+        self._create_left_frame()
+        
+        # 右側のフレーム（編集エリア）
+        self._create_right_frame()
+
+    def _create_left_frame(self):
+        self.left_frame = ttk.Frame(self.main_frame, width=300)
+        self.left_frame.pack(side='left', fill='y', padx=5, pady=5)
+
+        # メモ追加ボタン
+        self.add_button = ttk.Button(self.left_frame, text="新規メモ追加", command=self.add_memo)
+        self.add_button.pack(fill='x', pady=(0, 5))
+
+        # Treeviewの作成
+        self._create_tree_view()
+
+    def _create_tree_view(self):
+        self.tree = ttk.Treeview(self.left_frame, columns=('title', 'date', 'tags'), show='headings')
+        self.tree_style = ttk.Style()
+        self.tree_style.configure('Filtered.Treeview', background='#FFE6E6')
+        
+        # 列の設定
+        self.tree.heading('title', text='タイトル', command=self.sort_by_title)
+        self.tree.column('title', width=150)
+        self.tree.heading('date', text='日付', command=self.sort_by_date)
+        self.tree.column('date', width=100)
+        self.tree.heading('tags', text='タグ')
+        self.tree.column('tags', width=150)
+        
+        # ソート状態の初期化
+        self.sort_reverse_date = False
+        self.sort_reverse_title = False
+        
+        # スクロールバー
+        self.scrollbar = ttk.Scrollbar(self.left_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=self.scrollbar.set)
+        
+        self.scrollbar.pack(side='right', fill='y')
+        self.tree.pack(fill='both', expand=True)
+        
+        # 選択イベントの設定
+        self.tree.bind('<<TreeviewSelect>>', self.on_tree_select)
+
+    def _create_right_frame(self):
+        self.right_frame = ttk.Frame(self.main_frame)
+        self.right_frame.pack(side='right', fill='both', expand=True, padx=5, pady=5)
+
+        # 上部フレーム
+        self._create_edit_top_frame()
+
+        # テキストエリア
+        self.text_area = tk.Text(self.right_frame, wrap=tk.WORD)
+        self.text_area.pack(expand=True, fill='both')
+        self.text_area.bind('<<Modified>>', self.on_text_modified)
+
+        # タグ編集エリア
+        self._create_tags_frame()
+
+    def _create_edit_top_frame(self):
+        self.edit_top_frame = ttk.Frame(self.right_frame)
+        self.edit_top_frame.pack(fill='x', pady=(0, 5))
+
+        # タイトル編集
+        self.title_var = tk.StringVar()
+        self.title_entry = ttk.Entry(self.edit_top_frame, textvariable=self.title_var)
+        self.title_entry.pack(side='left', fill='x', expand=True)
+        self.title_var.trace_add('write', self.on_title_change)
+
+        # 日付選択
+        self.date_entry = DateEntry(self.edit_top_frame, width=12, background='darkblue',
+                                  foreground='white', borderwidth=2, locale='ja_JP',
+                                  date_pattern='yyyy/mm/dd')
+        self.date_entry.pack(side='left', padx=5)
+        self.date_entry.bind('<<DateEntrySelected>>', self.on_date_change)
+
+        # 削除ボタン
+        self.delete_button = ttk.Button(self.edit_top_frame, text="削除", command=self.delete_current_memo)
+        self.delete_button.pack(side='right', padx=5)
+
+    def _create_tags_frame(self):
+        self.tags_frame = ttk.LabelFrame(self.right_frame, text="タグ", padding=5)
+        self.tags_frame.pack(fill='x', pady=5)
+
+        # タグ表示ラベル
+        self.tags_label = ttk.Label(self.tags_frame, text="")
+        self.tags_label.pack(side='left', fill='x', expand=True)
+
+        # タグ編集フレーム
+        self.tag_edit_frame = ttk.Frame(self.tags_frame)
+        self.tag_edit_frame.pack(side='right')
+
+        # タグ入力フィールド
+        self.tag_var = tk.StringVar()
+        self.tag_entry = ttk.Entry(self.tag_edit_frame, textvariable=self.tag_var, width=20)
+        self.tag_entry.pack(side='left', padx=5)
+
+        # タグ操作ボタン
+        self.add_tag_button = ttk.Button(self.tag_edit_frame, text="追加", command=self.add_tag)
+        self.add_tag_button.pack(side='left', padx=2)
+        self.remove_tag_button = ttk.Button(self.tag_edit_frame, text="削除", command=self.remove_tag)
+        self.remove_tag_button.pack(side='left', padx=2)
+
+    # イベントハンドラー
+    def on_tree_select(self, event):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        
+        self.current_memo_id = selection[0]
+        memo = self.memo_manager.memos[self.current_memo_id]
+        
+        self.title_var.set(memo.title)
+        self.date_entry.set_date(datetime.strptime(memo.date, '%Y/%m/%d').date())
+        
+        self.text_area.delete(1.0, tk.END)
+        self.text_area.insert(1.0, memo.content)
+        self.text_area.edit_modified(False)
+        
+        self.update_tags_display()
+
+    def on_title_change(self, *args):
+        if self.current_memo_id:
+            title = self.title_var.get()
+            self.memo_manager.memos[self.current_memo_id].title = title
+            self.tree.set(self.current_memo_id, 'title', title)
+
+    def on_date_change(self, event):
+        if self.current_memo_id:
+            date = self.date_entry.get_date().strftime('%Y/%m/%d')
+            self.memo_manager.memos[self.current_memo_id].date = date
+            self.tree.set(self.current_memo_id, 'date', date)
+
+    def on_text_modified(self, event=None):
+        if self.text_area.edit_modified() and self.current_memo_id:
+            self.memo_manager.memos[self.current_memo_id].content = self.text_area.get(1.0, tk.END)
+            self.text_area.edit_modified(False)
+
+    # メモ操作
+    def add_memo(self):
+        memo_id = self.memo_manager.add_memo()
+        memo = self.memo_manager.memos[memo_id]
+        
+        self.tree.insert('', 'end', memo_id, values=(memo.title, memo.date, ""))
+        self.tree.selection_set(memo_id)
+        self.tree.see(memo_id)
+        self.on_tree_select(None)
+
+    def delete_current_memo(self):
+        if len(self.memo_manager.memos) <= 1:
+            messagebox.showwarning("警告", "最後のメモは削除できません。")
+            return
+
+        if self.current_memo_id:
+            self.memo_manager.delete_memo(self.current_memo_id)
+            self.tree.delete(self.current_memo_id)
+            
+            remaining = self.tree.get_children()
+            if remaining:
+                self.tree.selection_set(remaining[0])
+                self.tree.see(remaining[0])
+                self.on_tree_select(None)
+            else:
+                self.add_memo()
+
+    # タグ操作
+    def add_tag(self):
+        if not self.current_memo_id:
+            return
+
+        tag = self.tag_var.get().strip()
+        if tag:
+            memo = self.memo_manager.memos[self.current_memo_id]
+            memo.tags.add(tag)
+            self.update_tags_display()
+            self.tag_var.set("")
+        else:
+            TagSelectionDialog(self.root, self, "追加するタグを選択", self.add_selected_tags)
+
+    def add_selected_tags(self, selected_tags):
+        if not selected_tags or not self.current_memo_id:
+            return
+        
+        memo = self.memo_manager.memos[self.current_memo_id]
+        memo.tags.update(selected_tags)
+        self.update_tags_display()
+
+    def remove_tag(self):
+        if not self.current_memo_id:
+            return
+
+        tag = self.tag_var.get().strip()
+        if tag:
+            memo = self.memo_manager.memos[self.current_memo_id]
+            if tag in memo.tags:
+                memo.tags.remove(tag)
+                self.update_tags_display()
+            self.tag_var.set("")
+        else:
+            TagSelectionDialog(self.root, self, "削除するタグを選択", self.remove_selected_tags)
+
+    def remove_selected_tags(self, selected_tags):
+        if not selected_tags or not self.current_memo_id:
+            return
+        
+        memo = self.memo_manager.memos[self.current_memo_id]
+        memo.tags -= set(selected_tags)
+        self.update_tags_display()
+
+    def update_tags_display(self):
+        if not self.current_memo_id:
+            return
+        
+        memo = self.memo_manager.memos[self.current_memo_id]
+        tags_str = ', '.join(sorted(memo.tags))
+        
+        self.tags_label.config(text=tags_str)
+        self.tree.set(self.current_memo_id, 'tags', tags_str)
+
+    # ファイル操作
+    def save_file(self):
+        if self.memo_manager.current_file:
+            try:
+                self.memo_manager.save_to_file(self.memo_manager.current_file)
+                messagebox.showinfo("保存完了", "ファイルを保存しました。")
+            except Exception as e:
+                messagebox.showerror("エラー", f"保存中にエラーが発生しました：{str(e)}")
+        else:
+            self.save_file_as()
+
+    def save_file_as(self):
+        try:
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".xml",
+                filetypes=[("XMLファイル", "*.xml"), ("すべてのファイル", "*.*")]
+            )
+            if file_path:
+                self.memo_manager.save_to_file(file_path)
+                self.update_title()
+                messagebox.showinfo("保存完了", "ファイルを保存しました。")
+        except Exception as e:
+            messagebox.showerror("エラー", f"保存中にエラーが発生しました：{str(e)}")
+
+    def open_file(self):
+        try:
+            file_path = filedialog.askopenfilename(
+                filetypes=[("XMLファイル", "*.xml"), ("すべてのファイル", "*.*")]
+            )
+            if file_path:
+                self.memo_manager.load_from_file(file_path)
+                self.update_title()
+                
+                # Treeviewの更新
+                for item_id in self.tree.get_children():
+                    self.tree.delete(item_id)
+                
+                for memo_id, memo in self.memo_manager.memos.items():
+                    self.tree.insert('', 'end', memo_id, 
+                                   values=(memo.title, memo.date, ', '.join(sorted(memo.tags))))
+                
+                if not self.memo_manager.memos:
+                    self.add_memo()
+                else:
+                    first_id = self.tree.get_children()[0]
+                    self.tree.selection_set(first_id)
+                    self.tree.see(first_id)
+                    self.on_tree_select(None)
+                
+                messagebox.showinfo("読み込み完了", "ファイルを読み込みました。")
+        except Exception as e:
+            messagebox.showerror("エラー", f"ファイルを開く際にエラーが発生しました：{str(e)}")
+
+    # ソート機能
+    def sort_by_title(self):
+        items = [(self.tree.set(item, 'title'), item) for item in self.tree.get_children('')]
+        locale.setlocale(locale.LC_ALL, '')
+        items.sort(key=lambda x: locale.strxfrm(x[0]), reverse=self.sort_reverse_title)
+        self.sort_reverse_title = not self.sort_reverse_title
+        for index, (title, item) in enumerate(items):
+            self.tree.move(item, '', index)
+
+    def sort_by_date(self):
+        items = [(self.tree.set(item, 'date'), item) for item in self.tree.get_children('')]
+        items.sort(reverse=self.sort_reverse_date)
+        self.sort_reverse_date = not self.sort_reverse_date
+        for index, (date, item) in enumerate(items):
+            self.tree.move(item, '', index)
+
+    # フィルター機能
+    def show_tag_filter_dialog(self):
+        TagFilterDialog(self.root, self)
+
+    def show_date_filter_dialog(self):
+        DateFilterDialog(self.root, self)
+
+    def apply_date_filter(self, start_date: str, end_date: str):
+        print(f"MemoApp.apply_date_filter: start={start_date}, end={end_date}")
+        if not start_date or not end_date:
+            print("MemoApp: 日付フィルター解除")
+            self.is_date_filtered = False
+            if hasattr(self, 'current_date_range'):
+                delattr(self, 'current_date_range')
+        else:
+            print(f"MemoApp: 日付フィルター適用 - {start_date} から {end_date}")
+            self.is_date_filtered = True
+            self.current_date_range = (start_date, end_date)
+
+        self.refresh_memo_list()
+        self.update_filter_menu()
+        self.update_buttons_state()
+
+    def apply_tag_filter(self, selected_tags):
+        if not selected_tags:
+            print("MemoApp: タグフィルター解除")
+            self.is_tag_filtered = False
+            if hasattr(self, 'current_tag_filter'):
+                delattr(self, 'current_tag_filter')
+        else:
+            print(f"MemoApp: タグフィルター適用 - {selected_tags}")
+            self.is_tag_filtered = True
+            self.current_tag_filter = selected_tags
+
+        self.refresh_memo_list()
+        self.update_filter_menu()
+        self.update_buttons_state()
+
+    def update_buttons_state(self):
+        state = 'disabled' if self.is_tag_filtered or self.is_date_filtered else 'normal'
+        self.add_button.configure(state=state)
+        self.add_tag_button.configure(state=state)
+        self.remove_tag_button.configure(state=state)
+        self.tag_entry.configure(state=state)
+
+    # エクスポート機能
+    def show_export_dialog(self):
+        ExportDialog(self.root, self)
+
+    def export_memos(self, selected_only=False):
+        try:
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("テキストファイル", "*.txt"), ("すべてのファイル", "*.*")]
+            )
+            if file_path:
+                if selected_only and self.current_memo_id:
+                    self.memo_manager.export_memos(file_path, [self.current_memo_id])
+                else:
+                    self.memo_manager.export_memos(file_path)
+                messagebox.showinfo("エクスポート完了", "メモをエクスポートしました。")
+        except Exception as e:
+            messagebox.showerror("エラー", f"エクスポート中にエラーが発生しました：{str(e)}")
+
+class ExportDialog:
+    def __init__(self, parent, app):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("エクスポート設定")
+        self.dialog.geometry("300x150")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        self.export_frame = ttk.LabelFrame(self.dialog, text="エクスポート範囲", padding=10)
+        self.export_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.export_var = tk.StringVar(value="all")
+        ttk.Radiobutton(self.export_frame, text="すべてのメモ", 
+                       variable=self.export_var, value="all").pack(anchor='w')
+        ttk.Radiobutton(self.export_frame, text="選択中のメモのみ", 
+                       variable=self.export_var, value="selected").pack(anchor='w')
+        
+        button_frame = ttk.Frame(self.dialog)
+        button_frame.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Button(button_frame, text="キャンセル", 
+                  command=self.dialog.destroy).pack(side='right', padx=5)
+        ttk.Button(button_frame, text="エクスポート", 
+                  command=lambda: self.export(app)).pack(side='right')
+
+    def export(self, app):
+        selected_only = self.export_var.get() == "selected"
+        self.dialog.destroy()
+        app.export_memos(selected_only)
+
+class TagFilterDialog:
+    def __init__(self, parent, app):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("タグでフィルター")
+        self.dialog.geometry("300x400")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        self.tag_frame = ttk.LabelFrame(self.dialog, text="フィルターするタグを選択", padding=10)
+        self.tag_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        self.tag_listbox = tk.Listbox(self.tag_frame, selectmode=tk.MULTIPLE)
+        self.tag_listbox.pack(fill='both', expand=True)
+
+        for tag in app.memo_manager.get_all_tags():
+            self.tag_listbox.insert(tk.END, tag)
+
+        button_frame = ttk.Frame(self.dialog)
+        button_frame.pack(fill='x', padx=10, pady=10)
+
+        ttk.Button(button_frame, text="フィルター解除", 
+                  command=lambda: self.apply_filter(app, None)).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="キャンセル", 
+                  command=self.dialog.destroy).pack(side='right', padx=5)
+        ttk.Button(button_frame, text="実行", 
+                  command=lambda: self.apply_filter(app)).pack(side='right')
+
+    def apply_filter(self, app, selected_tags=None):
+        if selected_tags is None and self.tag_listbox.curselection():
+            selected_tags = [self.tag_listbox.get(i) for i in self.tag_listbox.curselection()]
+        
+        app.apply_tag_filter(selected_tags)
+        self.dialog.destroy()
+
+class DateFilterDialog:
+    def __init__(self, parent, app):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("日付でフィルター")
+        self.dialog.geometry("400x200")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        # 日付範囲の取得
+        start_date, end_date = app.memo_manager.get_date_range()
+
+        # 日付選択フレーム
+        self.date_frame = ttk.LabelFrame(self.dialog, text="日付範囲を選択", padding=10)
+        self.date_frame.pack(fill='x', padx=10, pady=5)
+
+        # 開始日
+        start_frame = ttk.Frame(self.date_frame)
+        start_frame.pack(fill='x', pady=5)
+        ttk.Label(start_frame, text="開始日：").pack(side='left')
+        self.start_date = DateEntry(start_frame, width=12, background='darkblue',
+                                  foreground='white', borderwidth=2, locale='ja_JP',
+                                  date_pattern='yyyy/mm/dd')
+        if start_date:
+            self.start_date.set_date(datetime.strptime(start_date, '%Y/%m/%d').date())
+        self.start_date.pack(side='left', padx=5)
+
+        # 終了日
+        end_frame = ttk.Frame(self.date_frame)
+        end_frame.pack(fill='x', pady=5)
+        ttk.Label(end_frame, text="終了日：").pack(side='left')
+        self.end_date = DateEntry(end_frame, width=12, background='darkblue',
+                                foreground='white', borderwidth=2, locale='ja_JP',
+                                date_pattern='yyyy/mm/dd')
+        if end_date:
+            self.end_date.set_date(datetime.strptime(end_date, '%Y/%m/%d').date())
+        self.end_date.pack(side='left', padx=5)
+
+        # ボタンフレーム
+        button_frame = ttk.Frame(self.dialog)
+        button_frame.pack(fill='x', padx=10, pady=10)
+
+        ttk.Button(button_frame, text="フィルター解除", 
+                  command=lambda: self.apply_filter(app, None, None)).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="キャンセル", 
+                  command=self.dialog.destroy).pack(side='right', padx=5)
+        ttk.Button(button_frame, text="実行", 
+                  command=lambda: self.apply_filter(app, self.start_date.get_date().strftime('%Y/%m/%d'), 
+                                                  self.end_date.get_date().strftime('%Y/%m/%d'))).pack(side='right')
+
+    def apply_filter(self, app, start_date=None, end_date=None):
+        if start_date is None and end_date is None:
+            print("DateFilterDialog: フィルター解除")
+            app.apply_date_filter("", "")
+        else:
+            print(f"DateFilterDialog: フィルター適用 - start={start_date}, end={end_date}")
+            app.apply_date_filter(start_date, end_date)
+        self.dialog.destroy()
+
+class TagSelectionDialog:
+    def __init__(self, parent, app, title, callback):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title(title)
+        self.dialog.geometry("300x400")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        self.tag_frame = ttk.LabelFrame(self.dialog, text="タグを選択", padding=10)
+        self.tag_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        self.tag_listbox = tk.Listbox(self.tag_frame, selectmode=tk.MULTIPLE)
+        self.tag_listbox.pack(fill='both', expand=True)
+
+        if title == "削除するタグを選択":
+            tags = sorted(app.memo_manager.memos[app.current_memo_id].tags)
+        else:
+            tags = app.memo_manager.get_all_tags()
+
+        for tag in tags:
+            self.tag_listbox.insert(tk.END, tag)
+
+        button_frame = ttk.Frame(self.dialog)
+        button_frame.pack(fill='x', padx=10, pady=10)
+
+        ttk.Button(button_frame, text="キャンセル", 
+                  command=self.dialog.destroy).pack(side='right', padx=5)
+        ttk.Button(button_frame, text="実行", 
+                  command=lambda: self.apply_selection(callback)).pack(side='right')
+
+    def apply_selection(self, callback):
+        selected_tags = [self.tag_listbox.get(i) for i in self.tag_listbox.curselection()]
+        self.dialog.destroy()
+        callback(selected_tags)
