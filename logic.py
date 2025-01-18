@@ -3,7 +3,17 @@ from xml.dom import minidom
 from datetime import datetime
 from typing import Dict, Set, Optional
 
+# メモの基本データを管理するクラス
 class Memo:
+    """
+    メモの基本情報を保持するクラス
+    
+    Attributes:
+        title (str): メモのタイトル
+        date (str): メモの作成/更新日付（YYYY/MM/DD形式）
+        content (str): メモの本文
+        tags (Set[str]): メモに付けられたタグのセット
+    """
     def __init__(self, title: str, date: str, content: str = "", tags: Optional[Set[str]] = None):
         self.title = title
         self.date = date
@@ -11,11 +21,24 @@ class Memo:
         self.tags = tags or set()
 
 class MemoManager:
+    """
+    メモの作成、保存、読み込みなどの操作を管理するクラス
+    
+    Attributes:
+        memos (Dict[str, Memo]): メモIDをキーとするメモオブジェクトの辞書
+        current_file (Optional[str]): 現在開いているファイルのパス
+    """
     def __init__(self):
         self.memos: Dict[str, Memo] = {}
         self.current_file: Optional[str] = None
 
     def add_memo(self) -> str:
+        """
+        新規メモを作成する
+        
+        Returns:
+            str: 作成されたメモのID
+        """
         memo_id = str(len(self.memos))
         title = "新規メモ"
         date = datetime.now().strftime('%Y/%m/%d')
@@ -23,37 +46,68 @@ class MemoManager:
         return memo_id
 
     def delete_memo(self, memo_id: str) -> bool:
+        """
+        指定されたIDのメモを削除する
+        
+        Args:
+            memo_id (str): 削除するメモのID
+            
+        Returns:
+            bool: 削除が成功した場合はTrue、メモが存在しない場合はFalse
+        """
         if memo_id in self.memos:
             del self.memos[memo_id]
             return True
         return False
 
     def get_all_tags(self) -> list[str]:
+        """
+        すべてのメモから一意のタグを収集し、ソートされたリストとして返す
+        
+        Returns:
+            list[str]: すべてのユニークなタグを含むソート済みリスト
+        """
         all_tags = set()
         for memo in self.memos.values():
             all_tags.update(memo.tags)
         return sorted(all_tags)
 
     def get_date_range(self) -> tuple[str, str]:
-        """メモの日付の範囲を取得"""
+        """
+        すべてのメモの日付範囲を取得する
+        
+        Returns:
+            tuple[str, str]: (最古の日付, 最新の日付)のタプル。メモが存在しない場合は空文字のタプル
+        """
         if not self.memos:
             return "", ""
         dates = [memo.date for memo in self.memos.values()]
         return min(dates), max(dates)
 
     def filter_by_date(self, start_date: str, end_date: str) -> list[str]:
-        """指定された日付範囲内のメモIDを取得"""
-        print(f"filter_by_date: start={start_date}, end={end_date}")
+        """
+        指定された日付範囲内のメモIDを取得する
+        
+        Args:
+            start_date (str): 開始日（YYYY/MM/DD形式）
+            end_date (str): 終了日（YYYY/MM/DD形式）
+            
+        Returns:
+            list[str]: 日付範囲内のメモIDのリスト
+        """
         filtered_ids = []
         for memo_id, memo in self.memos.items():
-            print(f"checking memo {memo_id}: date={memo.date}")
             if start_date <= memo.date <= end_date:
-                print(f"memo {memo_id} matches filter")
                 filtered_ids.append(memo_id)
-        print(f"filtered_ids: {filtered_ids}")
         return filtered_ids
 
     def save_to_file(self, file_path: str) -> None:
+        """
+        メモをXMLファイルに保存する
+        
+        Args:
+            file_path (str): 保存先のファイルパス
+        """
         root = ET.Element("memos")
         for memo_id, memo in self.memos.items():
             memo_elem = ET.SubElement(root, "memo")
@@ -74,6 +128,12 @@ class MemoManager:
         self.current_file = file_path
 
     def load_from_file(self, file_path: str) -> None:
+        """
+        XMLファイルからメモを読み込む
+        
+        Args:
+            file_path (str): 読み込むファイルのパス
+        """
         tree = ET.parse(file_path)
         root = tree.getroot()
         
@@ -92,20 +152,36 @@ class MemoManager:
         self.current_file = file_path
 
     def export_memos(self, file_path: str, memo_ids: Optional[list[str]] = None) -> None:
+        """
+        メモをテキストファイルにエクスポートする
+        
+        Args:
+            file_path (str): エクスポート先のファイルパス
+            memo_ids (Optional[list[str]]): エクスポートするメモのIDリスト。Noneの場合は全メモをエクスポート
+        """
         with open(file_path, 'w', encoding='utf-8') as file:
+            target_memos = []
             if memo_ids:
                 # 選択されたメモのみエクスポート
-                for memo_id in memo_ids:
-                    if memo_id in self.memos:
-                        memo = self.memos[memo_id]
-                        self._write_memo_to_file(file, memo)
+                target_memos = [self.memos[memo_id] for memo_id in memo_ids if memo_id in self.memos]
             else:
                 # すべてのメモをエクスポート
-                for memo in self.memos.values():
-                    self._write_memo_to_file(file, memo)
+                target_memos = list(self.memos.values())
+
+            for i, memo in enumerate(target_memos):
+                self._write_memo_to_file(file, memo)
+                # 最後のメモ以外は区切り線を追加
+                if i < len(target_memos) - 1:
                     file.write("-" * 50 + "\n")
 
     def _write_memo_to_file(self, file, memo: Memo) -> None:
+        """
+        メモの内容をファイルに書き込む（内部メソッド）
+        
+        Args:
+            file: 書き込み先のファイルオブジェクト
+            memo (Memo): 書き込むメモオブジェクト
+        """
         file.write(f"タイトル: {memo.title}\n")
         file.write(f"日付: {memo.date}\n")
         file.write(f"タグ: {', '.join(sorted(memo.tags))}\n")

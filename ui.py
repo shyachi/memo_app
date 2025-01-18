@@ -40,6 +40,8 @@ class MemoApp:
         self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="ファイル", menu=self.file_menu)
         self.file_menu.add_command(label="開く (Ctrl+O)", command=self.open_file, accelerator="Control-O")
+        self.file_menu.add_command(label="インポート", command=self.import_file)
+        self.file_menu.add_separator()
         self.file_menu.add_command(label="上書き保存 (Ctrl+S)", command=self.save_file, accelerator="Control-S")
         self.file_menu.add_command(label="名前をつけて保存", command=self.save_file_as)
         self.file_menu.add_command(label="エクスポート", command=self.show_export_dialog)
@@ -463,7 +465,15 @@ class MemoApp:
     def show_export_dialog(self):
         ExportDialog(self.root, self)
 
-    def export_memos(self, selected_only=False):
+    def export_memos(self, selected_only=False, filtered_only=False, filtered_ids=None):
+        """
+        メモをエクスポートする
+        
+        Args:
+            selected_only (bool): 選択中のメモのみエクスポートする場合True
+            filtered_only (bool): フィルター中のメモのみエクスポートする場合True
+            filtered_ids (list): フィルター中のメモIDのリスト
+        """
         try:
             file_path = filedialog.asksaveasfilename(
                 defaultextension=".txt",
@@ -472,17 +482,45 @@ class MemoApp:
             if file_path:
                 if selected_only and self.current_memo_id:
                     self.memo_manager.export_memos(file_path, [self.current_memo_id])
+                elif filtered_only and filtered_ids:
+                    self.memo_manager.export_memos(file_path, filtered_ids)
                 else:
                     self.memo_manager.export_memos(file_path)
                 messagebox.showinfo("エクスポート完了", "メモをエクスポートしました。")
         except Exception as e:
             messagebox.showerror("エラー", f"エクスポート中にエラーが発生しました：{str(e)}")
 
+    def import_file(self):
+        """XMLファイルから既存のメモリストにメモをインポートする"""
+        try:
+            file_path = filedialog.askopenfilename(
+                filetypes=[("XMLファイル", "*.xml"), ("すべてのファイル", "*.*")]
+            )
+            if file_path:
+                # 一時的なMemoManagerを作成してファイルを読み込む
+                temp_manager = MemoManager()
+                temp_manager.load_from_file(file_path)
+                
+                # 既存のメモIDの最大値を取得
+                next_id = max([int(id) for id in self.memo_manager.memos.keys()], default=-1) + 1
+                
+                # 新しいメモを追加
+                for memo in temp_manager.memos.values():
+                    memo_id = str(next_id)
+                    self.memo_manager.memos[memo_id] = memo
+                    self.tree.insert('', 'end', memo_id, 
+                                   values=(memo.title, memo.date, ', '.join(sorted(memo.tags))))
+                    next_id += 1
+                
+                messagebox.showinfo("インポート完了", "メモをインポートしました。")
+        except Exception as e:
+            messagebox.showerror("エラー", f"インポート中にエラーが発生しました：{str(e)}")
+
 class ExportDialog:
     def __init__(self, parent, app):
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("エクスポート設定")
-        self.dialog.geometry("300x150")
+        self.dialog.geometry("300x200")  # サイズを調整
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -494,6 +532,11 @@ class ExportDialog:
                        variable=self.export_var, value="all").pack(anchor='w')
         ttk.Radiobutton(self.export_frame, text="選択中のメモのみ", 
                        variable=self.export_var, value="selected").pack(anchor='w')
+        # フィルター中のメモのエクスポートオプションを追加
+        ttk.Radiobutton(self.export_frame, text="フィルター中のメモ", 
+                       variable=self.export_var, value="filtered",
+                       state='normal' if app.is_tag_filtered or app.is_date_filtered else 'disabled'
+                       ).pack(anchor='w')
         
         button_frame = ttk.Frame(self.dialog)
         button_frame.pack(fill='x', padx=10, pady=10)
@@ -504,9 +547,17 @@ class ExportDialog:
                   command=lambda: self.export(app)).pack(side='right')
 
     def export(self, app):
-        selected_only = self.export_var.get() == "selected"
+        export_type = self.export_var.get()
         self.dialog.destroy()
-        app.export_memos(selected_only)
+        
+        if export_type == "selected":
+            app.export_memos(selected_only=True)
+        elif export_type == "filtered":
+            # フィルター中のメモをエクスポート
+            filtered_ids = [item for item in app.tree.get_children()]
+            app.export_memos(filtered_only=True, filtered_ids=filtered_ids)
+        else:  # "all"
+            app.export_memos()
 
 class TagFilterDialog:
     def __init__(self, parent, app):
