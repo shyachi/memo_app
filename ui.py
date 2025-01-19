@@ -56,6 +56,11 @@ class MemoApp:
         self.filter_menu.add_separator()
         self.filter_menu.add_command(label="すべてのフィルターを解除", command=self.clear_all_filters)
 
+        # 検索メニュー
+        self.search_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="検索", menu=self.search_menu)
+        self.search_menu.add_command(label="メモを検索", command=self.show_search_dialog)
+
     def update_filter_menu(self):
         """フィルターメニューの表示を更新"""
         tag_label = "タグでフィルター（実行中）" if self.is_tag_filtered else "タグでフィルター"
@@ -423,6 +428,10 @@ class MemoApp:
     def show_date_filter_dialog(self):
         DateFilterDialog(self.root, self)
 
+    def show_search_dialog(self):
+        """検索ダイアログを表示"""
+        SearchDialog(self.root, self)
+
     def apply_date_filter(self, start_date: str, end_date: str):
         print(f"MemoApp.apply_date_filter: start={start_date}, end={end_date}")
         if not start_date or not end_date:
@@ -650,6 +659,130 @@ class DateFilterDialog:
             print(f"DateFilterDialog: フィルター適用 - start={start_date}, end={end_date}")
             app.apply_date_filter(start_date, end_date)
         self.dialog.destroy()
+
+class SearchDialog:
+    def __init__(self, parent, app):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("メモを検索")
+        self.dialog.geometry("400x180")
+        self.dialog.transient(parent)
+        
+        self.app = app
+        self.search_results = []
+        self.current_result_index = -1
+        
+        # 検索フレーム
+        search_frame = ttk.Frame(self.dialog, padding=10)
+        search_frame.pack(fill='x')
+        
+        ttk.Label(search_frame, text="検索内容：").pack(side='left')
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
+        self.search_entry.pack(side='left', padx=5)
+        
+        # 検索結果表示ラベル
+        self.result_label = ttk.Label(self.dialog, text="")
+        self.result_label.pack(fill='x', padx=10)
+        
+        # ボタンフレーム
+        button_frame = ttk.Frame(self.dialog, padding=10)
+        button_frame.pack(fill='x')
+        
+        self.prev_button = ttk.Button(button_frame, text="前の項目", command=self.prev_result, state='disabled')
+        self.prev_button.pack(side='left', padx=5)
+        
+        self.next_button = ttk.Button(button_frame, text="次の項目", command=self.next_result, state='disabled')
+        self.next_button.pack(side='left', padx=5)
+        
+        ttk.Button(button_frame, text="実行", command=self.execute_search).pack(side='right', padx=5)
+        ttk.Button(button_frame, text="キャンセル", command=self.close_dialog).pack(side='right', padx=5)
+        
+        self.search_entry.focus_set()
+        self.dialog.bind('<Return>', lambda e: self.execute_search())
+        self.dialog.protocol("WM_DELETE_WINDOW", self.close_dialog)
+
+    def execute_search(self):
+        search_text = self.search_var.get()
+        if not search_text:
+            return
+            
+        # 大文字小文字を区別しない検索を実行
+        self.search_results = self.app.memo_manager.search_memos(search_text, case_sensitive=False)
+        self.current_result_index = -1
+        
+        if self.search_results:
+            self.next_result()
+            self.update_button_states()
+            self.result_label.config(text=f"{len(self.search_results)}件見つかりました。")
+        else:
+            self.result_label.config(text="見つかりませんでした。")
+
+    def close_dialog(self):
+        # ハイライトを解除
+        self.app.text_area.tag_remove('search', '1.0', tk.END)
+        self.dialog.destroy()
+
+    def next_result(self):
+        if not self.search_results:
+            return
+            
+        self.current_result_index = (self.current_result_index + 1) % len(self.search_results)
+        self.show_current_result()
+        self.update_button_states()
+
+    def prev_result(self):
+        if not self.search_results:
+            return
+            
+        self.current_result_index = (self.current_result_index - 1) % len(self.search_results)
+        self.show_current_result()
+        self.update_button_states()
+
+    def show_current_result(self):
+        if not (0 <= self.current_result_index < len(self.search_results)):
+            return
+
+        memo_id, start, end, is_title = self.search_results[self.current_result_index]
+        memo = self.app.memo_manager.memos[memo_id]
+        
+        # メモを選択してテキストエリアを更新
+        self.app.tree.selection_set(memo_id)
+        self.app.tree.see(memo_id)
+        self.app.on_tree_select(None)
+        
+        # テキストエリアの更新を待つ
+        self.dialog.after(10, lambda: self._highlight_text(start, end, is_title))
+
+    def _highlight_text(self, start, end, is_title):
+        try:
+            self.app.text_area.tag_remove('search', '1.0', tk.END)
+            self.app.text_area.tag_config('search', background='yellow')
+
+            # タイトルとコンテンツの位置を計算
+            if is_title:
+                start_pos = f"1.{start}"
+                end_pos = f"1.{end}"
+            else:
+                # コンテンツ内の位置を計算（タイトル行を考慮）
+                content = self.app.text_area.get('1.0', tk.END)
+                lines = content[:start].count('\n') + 1
+                start_col = start - content[:start].rindex('\n') - 1 if '\n' in content[:start] else start
+                end_col = end - content[:end].rindex('\n') - 1 if '\n' in content[:end] else end
+                start_pos = f"{lines}.{start_col}"
+                end_pos = f"{lines}.{end_col}"
+
+            # ハイライトを適用
+            self.app.text_area.tag_add('search', start_pos, end_pos)
+            self.app.text_area.see(start_pos)
+            self.app.text_area.focus_set()
+            self.app.text_area.mark_set(tk.INSERT, start_pos)
+        except Exception as e:
+            messagebox.showerror("エラー", f"検索結果のハイライト中にエラーが発生しました：{str(e)}")
+
+    def update_button_states(self):
+        state = 'normal' if self.search_results else 'disabled'
+        self.prev_button.configure(state=state)
+        self.next_button.configure(state=state)
 
 class TagSelectionDialog:
     def __init__(self, parent, app, title, callback):

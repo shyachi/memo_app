@@ -186,3 +186,47 @@ class MemoManager:
         file.write(f"日付: {memo.date}\n")
         file.write(f"タグ: {', '.join(sorted(memo.tags))}\n")
         file.write(f"内容:\n{memo.content}\n")
+
+    def search_memos(self, search_text: str, case_sensitive: bool = False) -> list[tuple[str, int, int, bool]]:
+        """
+        メモの内容を検索する
+        
+        Args:
+            search_text (str): 検索するテキスト
+            case_sensitive (bool): 大文字小文字を区別するかどうか（デフォルトはFalse）
+            
+        Returns:
+            list[tuple[str, int, int, bool]]: (メモID, 開始位置, 終了位置, タイトル内フラグ)のリスト
+        """
+        if not search_text:
+            return []
+
+        results = []
+        search_len = len(search_text)
+
+        # 大文字小文字を区別しない場合は検索テキストを小文字に変換
+        if not case_sensitive:
+            search_text = search_text.lower()
+
+        for memo_id, memo in self.memos.items():
+            # タイトル内を検索
+            title = memo.title if case_sensitive else memo.title.lower()
+            title_start = 0
+            while title_start <= len(title) - search_len:
+                pos = title.find(search_text, title_start)
+                if pos == -1:
+                    break
+                results.append((memo_id, pos, pos + search_len, True))
+                title_start = pos + search_len
+            
+            # 内容を検索
+            content = memo.content if case_sensitive else memo.content.lower()
+            content_start = 0
+            while content_start <= len(content) - search_len:
+                pos = content.find(search_text, content_start)
+                if pos == -1:
+                    break
+                results.append((memo_id, pos, pos + search_len, False))
+                content_start = pos + search_len
+        
+        return results
