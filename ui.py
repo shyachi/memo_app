@@ -433,14 +433,11 @@ class MemoApp:
         SearchDialog(self.root, self)
 
     def apply_date_filter(self, start_date: str, end_date: str):
-        print(f"MemoApp.apply_date_filter: start={start_date}, end={end_date}")
         if not start_date or not end_date:
-            print("MemoApp: 日付フィルター解除")
             self.is_date_filtered = False
             if hasattr(self, 'current_date_range'):
                 delattr(self, 'current_date_range')
         else:
-            print(f"MemoApp: 日付フィルター適用 - {start_date} から {end_date}")
             self.is_date_filtered = True
             self.current_date_range = (start_date, end_date)
 
@@ -450,12 +447,10 @@ class MemoApp:
 
     def apply_tag_filter(self, selected_tags):
         if not selected_tags:
-            print("MemoApp: タグフィルター解除")
             self.is_tag_filtered = False
             if hasattr(self, 'current_tag_filter'):
                 delattr(self, 'current_tag_filter')
         else:
-            print(f"MemoApp: タグフィルター適用 - {selected_tags}")
             self.is_tag_filtered = True
             self.current_tag_filter = selected_tags
 
@@ -653,10 +648,8 @@ class DateFilterDialog:
 
     def apply_filter(self, app, start_date=None, end_date=None):
         if start_date is None and end_date is None:
-            print("DateFilterDialog: フィルター解除")
             app.apply_date_filter("", "")
         else:
-            print(f"DateFilterDialog: フィルター適用 - start={start_date}, end={end_date}")
             app.apply_date_filter(start_date, end_date)
         self.dialog.destroy()
 
