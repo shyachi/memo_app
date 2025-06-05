@@ -133,7 +133,9 @@ class MemoManager:
     def load_from_file(self, file_path: str) -> None:
         """
         XMLファイルからメモを読み込む
-        
+
+        既存のメモはすべて削除され、読み込んだメモには0から順にIDが再割り当てされる。
+
         Args:
             file_path (str): 読み込むファイルのパス
         """
