@@ -35,11 +35,14 @@ class MemoManager:
     def add_memo(self) -> str:
         """
         新規メモを作成する
-        
+
         Returns:
             str: 作成されたメモのID
+
+        Note:
+            メモIDは既存IDの数値部分の最大値に1を加えて生成される
         """
-        memo_id = str(len(self.memos))
+        memo_id = str(max(map(int, self.memos.keys()), default=-1) + 1)
         title = "新規メモ"
         date = datetime.now().strftime('%Y/%m/%d')
         self.memos[memo_id] = Memo(title, date)
